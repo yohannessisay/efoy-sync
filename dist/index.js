@@ -92,7 +92,31 @@ const ui = {
     step: (message) => ui.log(message, ui.icons.gear, ui.colors.cyan),
 };
 const handleError = (error) => {
-    ui.error(`An unexpected error occurred: ${error.message}`);
+    let errorMessage = error.message;
+    // Check for common configuration-related errors
+    const configErrorPatterns = [
+        /Could not resolve hostname/i,
+        /Identity file .* not accessible/i,
+        /Permission denied/i,
+        /scp: Connection closed/i,
+        /Invalid PASV response/i,
+        /FTP user command failed/i,
+        /FTP pass command failed/i,
+        /FTP response timeout/i,
+        /FTP STOR command failed/i,
+        /Failed to create directory/i,
+        /Unexpected FTP welcome message/i,
+        /Missing required fields in efoy-sync.json/i,
+        /Invalid deployment method specified in efoy-sync.json/i,
+    ];
+    const isConfigError = configErrorPatterns.some(pattern => pattern.test(errorMessage));
+    if (isConfigError) {
+        ui.error('It looks like there\'s a problem with your efoy-sync.json configuration. Please double-check your server address, username, password, and private key path for the selected deployment method (FTP or SSH).');
+        ui.info(`Original error details: ${errorMessage}`);
+    }
+    else {
+        ui.error(`An unexpected error occurred: ${errorMessage}`);
+    }
     process.exit(1);
 };
 const runBuildCommand = (command) => {
@@ -154,9 +178,47 @@ const uploadViaSsh = (config) => __awaiter(void 0, void 0, void 0, function* () 
 });
 const main = () => __awaiter(void 0, void 0, void 0, function* () {
     ui.log('🚀 Starting efoy-sync...', ui.icons.rocket, ui.colors.cyan);
+    const defaultConfigContent = JSON.stringify({
+        "run": "npm run build",
+        "final_folder": "dist",
+        "destination_folder": "/var/www/html",
+        "method": "ssh",
+        "ssh": {
+            "host": "your_server_ip",
+            "username": "your_username",
+            "privateKey": "~/.ssh/id_rsa"
+        },
+        "ftp": {
+            "FTP_USERNAME": "your_ftp_username",
+            "FTP_PASSWORD": "your_ftp_password",
+            "FTP_ADDRESS": "your_ftp_server"
+        }
+    }, null, 2);
     if (!fs.existsSync(configFilePath)) {
-        ui.error('efoy-sync.json not found. Please create it in your project root.');
-        return;
+        ui.warn('efoy-sync.json not found.');
+        const questions = [
+            {
+                type: 'confirm',
+                name: 'createConfig',
+                message: 'efoy-sync will now create the config file (efoy-sync.json) in your project root. Continue?',
+                default: true,
+            },
+        ];
+        const answers = yield inquirer_1.default.prompt(questions);
+        if (answers.createConfig) {
+            try {
+                fs.writeFileSync(configFilePath, defaultConfigContent);
+                ui.success('efoy-sync.json created successfully. Please edit it with your deployment details.');
+            }
+            catch (error) {
+                ui.error(`Error creating efoy-sync.json: ${error.message}`);
+                process.exit(1);
+            }
+        }
+        else {
+            ui.info('efoy-sync.json creation skipped. You can create it manually later.');
+            process.exit(0);
+        }
     }
     const config = JSON.parse(fs.readFileSync(configFilePath, 'utf8'));
     if (config.run) {
