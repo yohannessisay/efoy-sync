@@ -1,0 +1,33 @@
+{
+  "name": "efoy-sync",
+  "version": "1.0.0",
+  "description": "A simple tool to sync your build files to a remote server using FTP or SSH.",
+  "main": "dist/index.js",
+  "bin": {
+    "efoy-sync": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "ftp",
+    "ssh",
+    "sync",
+    "deploy"
+  ],
+  "author": "Yohannes Sisay <yohannessisay90@gmail.com>",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^24.0.10",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@types/inquirer": "^8.2.4",
+    "basic-ftp": "^5.0.5",
+    "inquirer": "^8.2.4",
+    "node-ssh": "^13.2.1"
+  }
+}
