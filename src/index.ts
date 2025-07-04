@@ -3,13 +3,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { exec } from 'child_process';
-import { Client } from 'basic-ftp';
-import { NodeSSH } from 'node-ssh';
 import inquirer from 'inquirer';
+import { CustomFtpClient } from './services/ftp';
 
 const configFilePath = path.join(process.cwd(), 'efoy-sync.json');
-const logDir = path.join(process.cwd(), 'efoy-sync-logs');
-
 interface Config {
     run?: string;
     final_folder: string;
@@ -27,29 +24,62 @@ interface Config {
     };
 }
 
-const log = (message: string) => {
-    if (!fs.existsSync(logDir)) {
-        fs.mkdirSync(logDir);
-    }
-    const logFile = path.join(logDir, `log-${new Date().toISOString().split('T')[0]}.txt`);
-    fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${message}\n`);
-    console.log(message);
+const logDir = path.join(process.cwd(), 'efoy-sync-logs');
+
+const ui: any = {
+    colors: {
+        reset: "\x1b[0m",
+        green: "\x1b[32m",
+        red: "\x1b[31m",
+        blue: "\x1b[34m",
+        yellow: "\x1b[33m",
+        cyan: "\x1b[36m",
+    },
+    icons: {
+        rocket: '🚀',
+        gear: '⚙️',
+        success: '✓',
+        error: '✗',
+        info: 'ℹ️',
+        warn: '⚠️',
+        sync: '🔄',
+        upload: '📤',
+        connect: '🔌',
+        build: '🛠️',
+        finish: '🎉',
+        cancel: '🛑',
+    },
+    log: (message: string, icon: string = ' ', color: string = ui.colors.reset) => {
+        const coloredMessage = `${color}${icon} ${message}${ui.colors.reset}`;
+        console.log(coloredMessage);
+
+        if (!fs.existsSync(logDir)) {
+            fs.mkdirSync(logDir);
+        }
+        const logFile = path.join(logDir, `log-${new Date().toISOString().split('T')[0]}.txt`);
+        fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${message}\n`);
+    },
+    info: (message: string) => ui.log(message, ui.icons.info, ui.colors.blue),
+    success: (message: string) => ui.log(message, ui.icons.success, ui.colors.green),
+    error: (message: string) => ui.log(message, ui.icons.error, ui.colors.red),
+    warn: (message: string) => ui.log(message, ui.icons.warn, ui.colors.yellow),
+    step: (message: string) => ui.log(message, ui.icons.gear, ui.colors.cyan),
 };
 
 const handleError = (error: any) => {
-    log(`ERROR: ${error.message}`);
+    ui.error(`An unexpected error occurred: ${error.message}`);
     process.exit(1);
 };
 
 const runBuildCommand = (command: string): Promise<void> => {
     return new Promise((resolve, reject) => {
-        log(`Running build command: ${command}`);
+        ui.step(`Running build command: ${command}`);
         const buildProcess = exec(command);
-        buildProcess.stdout?.on('data', (data) => console.log(data.toString()));
-        buildProcess.stderr?.on('data', (data) => console.error(data.toString()));
+        buildProcess.stdout?.on('data', (data) => ui.info(data.toString()));
+        buildProcess.stderr?.on('data', (data) => ui.warn(data.toString()));
         buildProcess.on('close', (code) => {
             if (code === 0) {
-                log('Build command completed successfully.');
+                ui.success('Build command completed successfully.');
                 resolve();
             } else {
                 reject(new Error(`Build command failed with exit code ${code}`));
@@ -59,20 +89,15 @@ const runBuildCommand = (command: string): Promise<void> => {
 };
 
 const uploadViaFtp = async (config: Config) => {
-    const client = new Client();
-    client.ftp.verbose = true;
+    const client = new CustomFtpClient(config.ftp!.FTP_ADDRESS!);
     try {
-        log('Connecting to FTP server...');
-        await client.access({
-            host: config.ftp?.FTP_ADDRESS,
-            user: config.ftp?.FTP_USERNAME,
-            password: config.ftp?.FTP_PASSWORD,
-        });
-        log('FTP connection successful.');
-        log(`Uploading files from ${config.final_folder} to ${config.destination_folder}`);
+        ui.step('Connecting to FTP server...');
+        await client.connect(config.ftp!.FTP_USERNAME!, config.ftp!.FTP_PASSWORD!);
+        ui.success('FTP connection successful.');
+        ui.step(`Uploading files from ${config.final_folder} to ${config.destination_folder}`);
         await client.ensureDir(config.destination_folder);
         await client.uploadFromDir(config.final_folder, config.destination_folder);
-        log('File upload completed successfully.');
+        ui.success('File upload completed successfully.');
     } catch (err) {
         handleError(err);
     } finally {
@@ -81,31 +106,32 @@ const uploadViaFtp = async (config: Config) => {
 };
 
 const uploadViaSsh = async (config: Config) => {
-    const ssh = new NodeSSH();
-    try {
-        log('Connecting to SSH server...');
-        await ssh.connect({
-            host: config.ssh!.host,
-            username: config.ssh!.username,
-            privateKey: fs.readFileSync(config.ssh!.privateKey, 'utf8'),
+    const { host, username, privateKey } = config.ssh!;
+    const sourceDir = `${config.final_folder}/.`;
+    const scpCommand = `scp -r -i ${privateKey} "${sourceDir}" ${username}@${host}:"${config.destination_folder}"`;
+
+    return new Promise<void>((resolve, reject) => {
+        ui.step('Uploading files via SCP...');
+        exec(scpCommand, (error, stdout, stderr) => {
+            if (error) {
+                const errorMessage = `SCP failed with error: ${error.message}\nStderr: ${stderr}\nStdout: ${stdout}`;
+                ui.error(errorMessage);
+                return reject(new Error(errorMessage));
+            }
+            if (stderr) {
+                ui.warn(`SCP stderr (non-fatal): ${stderr}`);
+            }
+            ui.info(`SCP stdout: ${stdout}`);
+            ui.success('File upload completed successfully.');
+            resolve();
         });
-        log('SSH connection successful.');
-        log(`Uploading files from ${config.final_folder} to ${config.destination_folder}`);
-        await ssh.putDirectory(config.final_folder, config.destination_folder, {
-            recursive: true,
-            concurrency: 10,
-        });
-        log('File upload completed successfully.');
-    } catch (err) {
-        handleError(err);
-    } finally {
-        ssh.dispose();
-    }
+    });
 };
 
 const main = async () => {
+    ui.log('🚀 Starting efoy-sync...', ui.icons.rocket, ui.colors.cyan);
     if (!fs.existsSync(configFilePath)) {
-        log('efoy-sync.json not found. Please create it in your project root.');
+        ui.error('efoy-sync.json not found. Please create it in your project root.');
         return;
     }
 
@@ -133,6 +159,7 @@ const main = async () => {
     const answers = await inquirer.prompt(questions);
 
     if (answers.proceed) {
+        ui.step(`Starting deployment via ${method}...`);
         if (method === 'ftp') {
             await uploadViaFtp(config);
         } else if (method === 'ssh') {
@@ -140,9 +167,9 @@ const main = async () => {
         } else {
             handleError(new Error('Invalid deployment method specified in efoy-sync.json'));
         }
-        log('Deployment finished.');
+        ui.log('🎉 Deployment finished successfully!', ui.icons.finish, ui.colors.green);
     } else {
-        log('Deployment cancelled by user.');
+        ui.log('🛑 Deployment cancelled by user.', ui.icons.cancel, ui.colors.yellow);
     }
 };
 
