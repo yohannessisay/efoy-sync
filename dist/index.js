@@ -47,6 +47,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const ftp_1 = require("./services/ftp");
+const ssh_1 = require("./services/ssh");
 const prompt_1 = require("./services/prompt");
 const configFilePath = path.join(process.cwd(), 'efoy-sync.json');
 const logDir = path.join(process.cwd(), 'efoy-sync-logs');
@@ -116,10 +117,10 @@ const handleError = (error) => {
     }
     process.exit(1);
 };
-const runBuildCommand = (command) => {
+const runCommand = (command) => {
     return new Promise((resolve, reject) => {
         var _a, _b;
-        ui.step(`Running build command: ${command}`);
+        ui.step(`Running command: ${command}`);
         const buildProcess = (0, child_process_1.exec)(command);
         (_a = buildProcess.stdout) === null || _a === void 0 ? void 0 : _a.on('data', (data) => ui.info(data.toString()));
         (_b = buildProcess.stderr) === null || _b === void 0 ? void 0 : _b.on('data', (data) => ui.warn(data.toString()));
@@ -151,27 +152,6 @@ const uploadViaFtp = (config) => __awaiter(void 0, void 0, void 0, function* () 
     finally {
         client.close();
     }
-});
-const uploadViaSsh = (config) => __awaiter(void 0, void 0, void 0, function* () {
-    const { host, username, privateKey } = config.ssh;
-    const sourceDir = `${config.final_folder}/.`;
-    const scpCommand = `scp -r -i ${privateKey} "${sourceDir}" ${username}@${host}:"${config.destination_folder}"`;
-    return new Promise((resolve, reject) => {
-        ui.step('Uploading files via SCP...');
-        (0, child_process_1.exec)(scpCommand, (error, stdout, stderr) => {
-            if (error) {
-                const errorMessage = `SCP failed with error: ${error.message}\nStderr: ${stderr}\nStdout: ${stdout}`;
-                ui.error(errorMessage);
-                return reject(new Error(errorMessage));
-            }
-            if (stderr) {
-                ui.warn(`SCP stderr (non-fatal): ${stderr}`);
-            }
-            ui.info(`SCP stdout: ${stdout}`);
-            ui.success('File upload completed successfully.');
-            resolve();
-        });
-    });
 });
 const main = () => __awaiter(void 0, void 0, void 0, function* () {
     ui.log('🚀 Starting efoy-sync...', ui.icons.rocket, ui.colors.cyan);
@@ -211,7 +191,7 @@ const main = () => __awaiter(void 0, void 0, void 0, function* () {
     }
     const config = JSON.parse(fs.readFileSync(configFilePath, 'utf8'));
     if (config.run) {
-        yield runBuildCommand(config.run);
+        yield runCommand(config.run);
     }
     const { final_folder, destination_folder, method } = config;
     if (!final_folder || !destination_folder || !method) {
@@ -224,7 +204,7 @@ const main = () => __awaiter(void 0, void 0, void 0, function* () {
             yield uploadViaFtp(config);
         }
         else if (method === 'ssh') {
-            yield uploadViaSsh(config);
+            yield (0, ssh_1.uploadViaSsh)(config, ui);
         }
         else {
             handleError(new Error('Invalid deployment method specified in efoy-sync.json'));

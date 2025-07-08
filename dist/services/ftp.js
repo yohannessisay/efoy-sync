@@ -125,7 +125,7 @@ class CustomFtpClient {
                         resolve();
                     }
                     catch (err) {
-                        reject(err);
+                        reject(err instanceof Error ? err : new Error(String(err)));
                     }
                 });
                 const onError = (err) => {

@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { exec } from 'child_process';
 import { CustomFtpClient } from './services/ftp';
+import { uploadViaSsh } from './services/ssh';
 import { confirm } from './services/prompt';
 
 const configFilePath = path.join(process.cwd(), 'efoy-sync.json');
@@ -97,9 +98,9 @@ const handleError = (error: any) => {
     process.exit(1);
 };
 
-const runBuildCommand = (command: string): Promise<void> => {
+const runCommand = (command: string): Promise<void> => {
     return new Promise((resolve, reject) => {
-        ui.step(`Running build command: ${command}`);
+        ui.step(`Running command: ${command}`);
         const buildProcess = exec(command);
         buildProcess.stdout?.on('data', (data) => ui.info(data.toString()));
         buildProcess.stderr?.on('data', (data) => ui.warn(data.toString()));
@@ -131,28 +132,6 @@ const uploadViaFtp = async (config: Config) => {
     }
 };
 
-const uploadViaSsh = async (config: Config) => {
-    const { host, username, privateKey } = config.ssh!;
-    const sourceDir = `${config.final_folder}/.`;
-    const scpCommand = `scp -r -i ${privateKey} "${sourceDir}" ${username}@${host}:"${config.destination_folder}"`;
-
-    return new Promise<void>((resolve, reject) => {
-        ui.step('Uploading files via SCP...');
-        exec(scpCommand, (error, stdout, stderr) => {
-            if (error) {
-                const errorMessage = `SCP failed with error: ${error.message}\nStderr: ${stderr}\nStdout: ${stdout}`;
-                ui.error(errorMessage);
-                return reject(new Error(errorMessage));
-            }
-            if (stderr) {
-                ui.warn(`SCP stderr (non-fatal): ${stderr}`);
-            }
-            ui.info(`SCP stdout: ${stdout}`);
-            ui.success('File upload completed successfully.');
-            resolve();
-        });
-    });
-};
 
 const main = async () => {
     ui.log('🚀 Starting efoy-sync...', ui.icons.rocket, ui.colors.cyan);
@@ -195,7 +174,7 @@ const main = async () => {
     const config: Config = JSON.parse(fs.readFileSync(configFilePath, 'utf8'));
 
     if (config.run) {
-        await runBuildCommand(config.run);
+        await runCommand(config.run);
     }
 
     const { final_folder, destination_folder, method } = config;
@@ -211,7 +190,7 @@ const main = async () => {
         if (method === 'ftp') {
             await uploadViaFtp(config);
         } else if (method === 'ssh') {
-            await uploadViaSsh(config);
+            await uploadViaSsh(config, ui);
         } else {
             handleError(new Error('Invalid deployment method specified in efoy-sync.json'));
         }

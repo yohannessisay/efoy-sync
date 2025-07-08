@@ -3,10 +3,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 export class CustomFtpClient {
-    private controlSocket: Socket;
+    private readonly controlSocket: Socket;
     private dataSocket: Socket | null = null;
-    private host: string;
-    private port: number;
+    private readonly host: string;
+    private readonly port: number;
     private controlSocketBuffer: string = '';
 
     constructor(host: string, port = 21) {
@@ -93,7 +93,7 @@ export class CustomFtpClient {
                     }
                     resolve();
                 } catch (err) {
-                    reject(err);
+                    reject(err instanceof Error ? err : new Error(String(err)));
                 }
             };
 
