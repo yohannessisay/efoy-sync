@@ -42,15 +42,12 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
-const inquirer_1 = __importDefault(require("inquirer"));
 const ftp_1 = require("./services/ftp");
+const prompt_1 = require("./services/prompt");
 const configFilePath = path.join(process.cwd(), 'efoy-sync.json');
 const logDir = path.join(process.cwd(), 'efoy-sync-logs');
 const ui = {
@@ -196,16 +193,8 @@ const main = () => __awaiter(void 0, void 0, void 0, function* () {
     }, null, 2);
     if (!fs.existsSync(configFilePath)) {
         ui.warn('efoy-sync.json not found.');
-        const questions = [
-            {
-                type: 'confirm',
-                name: 'createConfig',
-                message: 'efoy-sync will now create the config file (efoy-sync.json) in your project root. Continue?',
-                default: true,
-            },
-        ];
-        const answers = yield inquirer_1.default.prompt(questions);
-        if (answers.createConfig) {
+        const createConfig = yield (0, prompt_1.confirm)('efoy-sync will now create the config file (efoy-sync.json) in your project root. Continue?');
+        if (createConfig) {
             try {
                 fs.writeFileSync(configFilePath, defaultConfigContent);
                 ui.success('efoy-sync.json created successfully. Please edit it with your deployment details.');
@@ -228,16 +217,8 @@ const main = () => __awaiter(void 0, void 0, void 0, function* () {
     if (!final_folder || !destination_folder || !method) {
         handleError(new Error('Missing required fields in efoy-sync.json'));
     }
-    const questions = [
-        {
-            type: 'confirm',
-            name: 'proceed',
-            message: `You are about to sync the contents of '${final_folder}' to '${destination_folder}' on the remote server using ${method}. Do you want to proceed?`,
-            default: true,
-        },
-    ];
-    const answers = yield inquirer_1.default.prompt(questions);
-    if (answers.proceed) {
+    const proceed = yield (0, prompt_1.confirm)(`You are about to sync the contents of '${final_folder}' to '${destination_folder}' on the remote server using ${method}. Do you want to proceed?`);
+    if (proceed) {
         ui.step(`Starting deployment via ${method}...`);
         if (method === 'ftp') {
             yield uploadViaFtp(config);

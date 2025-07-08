@@ -3,8 +3,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { exec } from 'child_process';
-import inquirer from 'inquirer';
 import { CustomFtpClient } from './services/ftp';
+import { confirm } from './services/prompt';
 
 const configFilePath = path.join(process.cwd(), 'efoy-sync.json');
 interface Config {
@@ -176,18 +176,9 @@ const main = async () => {
 
     if (!fs.existsSync(configFilePath)) {
         ui.warn('efoy-sync.json not found.');
-        const questions = [
-            {
-                type: 'confirm',
-                name: 'createConfig',
-                message: 'efoy-sync will now create the config file (efoy-sync.json) in your project root. Continue?',
-                default: true,
-            },
-        ];
+        const createConfig = await confirm('efoy-sync will now create the config file (efoy-sync.json) in your project root. Continue?');
 
-        const answers = await inquirer.prompt(questions);
-
-        if (answers.createConfig) {
+        if (createConfig) {
             try {
                 fs.writeFileSync(configFilePath, defaultConfigContent);
                 ui.success('efoy-sync.json created successfully. Please edit it with your deployment details.');
@@ -213,18 +204,9 @@ const main = async () => {
         handleError(new Error('Missing required fields in efoy-sync.json'));
     }
 
-    const questions = [
-        {
-            type: 'confirm',
-            name: 'proceed',
-            message: `You are about to sync the contents of '${final_folder}' to '${destination_folder}' on the remote server using ${method}. Do you want to proceed?`,
-            default: true,
-        },
-    ];
+    const proceed = await confirm(`You are about to sync the contents of '${final_folder}' to '${destination_folder}' on the remote server using ${method}. Do you want to proceed?`);
 
-    const answers = await inquirer.prompt(questions);
-
-    if (answers.proceed) {
+    if (proceed) {
         ui.step(`Starting deployment via ${method}...`);
         if (method === 'ftp') {
             await uploadViaFtp(config);
