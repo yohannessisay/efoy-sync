@@ -1,6 +1,7 @@
 import { Socket } from 'net';
 import * as fs from 'fs';
 import * as path from 'path';
+import { SyncState, saveState } from './state';
 
 export class CustomFtpClient {
     private readonly controlSocket: Socket;
@@ -177,18 +178,27 @@ export class CustomFtpClient {
         }
     }
 
-    async uploadFromDir(localDir: string, remoteDir: string): Promise<void> {
+    async uploadFromDir(localDir: string, remoteDir: string, state: SyncState, ui: any): Promise<void> {
         const files = fs.readdirSync(localDir);
         for (const file of files) {
             const localPath = path.join(localDir, file);
             const remotePath = path.join(remoteDir, file);
+
+            if (state.uploadedFiles.includes(localPath)) {
+                ui.info(`Skipping already uploaded file: ${localPath}`);
+                continue;
+            }
+
             if (fs.statSync(localPath).isDirectory()) {
-                console.log(`Creating directory: ${remotePath}`)
+                ui.step(`Creating directory: ${remotePath}`);
                 await this.ensureDir(remotePath);
-                await this.uploadFromDir(localPath, remotePath);
+                await this.uploadFromDir(localPath, remotePath, state, ui);
             } else {
-                console.log(`Uploading file: ${localPath} to ${remotePath}`);
+                ui.step(`Uploading file: ${localPath} to ${remotePath}`);
                 await this.upload(localPath, remotePath);
+                state.uploadedFiles.push(localPath);
+                saveState(state);
+                ui.success(`Successfully uploaded: ${localPath}`);
             }
         }
     }

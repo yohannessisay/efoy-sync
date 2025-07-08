@@ -46,6 +46,7 @@ exports.CustomFtpClient = void 0;
 const net_1 = require("net");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const state_1 = require("./state");
 class CustomFtpClient {
     constructor(host, port = 21) {
         this.dataSocket = null;
@@ -201,20 +202,27 @@ class CustomFtpClient {
             }
         });
     }
-    uploadFromDir(localDir, remoteDir) {
+    uploadFromDir(localDir, remoteDir, state, ui) {
         return __awaiter(this, void 0, void 0, function* () {
             const files = fs.readdirSync(localDir);
             for (const file of files) {
                 const localPath = path.join(localDir, file);
                 const remotePath = path.join(remoteDir, file);
+                if (state.uploadedFiles.includes(localPath)) {
+                    ui.info(`Skipping already uploaded file: ${localPath}`);
+                    continue;
+                }
                 if (fs.statSync(localPath).isDirectory()) {
-                    console.log(`Creating directory: ${remotePath}`);
+                    ui.step(`Creating directory: ${remotePath}`);
                     yield this.ensureDir(remotePath);
-                    yield this.uploadFromDir(localPath, remotePath);
+                    yield this.uploadFromDir(localPath, remotePath, state, ui);
                 }
                 else {
-                    console.log(`Uploading file: ${localPath} to ${remotePath}`);
+                    ui.step(`Uploading file: ${localPath} to ${remotePath}`);
                     yield this.upload(localPath, remotePath);
+                    state.uploadedFiles.push(localPath);
+                    (0, state_1.saveState)(state);
+                    ui.success(`Successfully uploaded: ${localPath}`);
                 }
             }
         });

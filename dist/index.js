@@ -49,6 +49,7 @@ const child_process_1 = require("child_process");
 const ftp_1 = require("./services/ftp");
 const ssh_1 = require("./services/ssh");
 const prompt_1 = require("./services/prompt");
+const state_1 = require("./services/state");
 const configFilePath = path.join(process.cwd(), 'efoy-sync.json');
 const logDir = path.join(process.cwd(), 'efoy-sync-logs');
 const ui = {
@@ -135,7 +136,7 @@ const runCommand = (command) => {
         });
     });
 };
-const uploadViaFtp = (config) => __awaiter(void 0, void 0, void 0, function* () {
+const uploadViaFtp = (config, ui, state) => __awaiter(void 0, void 0, void 0, function* () {
     const client = new ftp_1.CustomFtpClient(config.ftp.FTP_ADDRESS);
     try {
         ui.step('Connecting to FTP server...');
@@ -143,7 +144,7 @@ const uploadViaFtp = (config) => __awaiter(void 0, void 0, void 0, function* () 
         ui.success('FTP connection successful.');
         ui.step(`Uploading files from ${config.final_folder} to ${config.destination_folder}`);
         yield client.ensureDir(config.destination_folder);
-        yield client.uploadFromDir(config.final_folder, config.destination_folder);
+        yield client.uploadFromDir(config.final_folder, config.destination_folder, state, ui);
         ui.success('File upload completed successfully.');
     }
     catch (err) {
@@ -155,6 +156,16 @@ const uploadViaFtp = (config) => __awaiter(void 0, void 0, void 0, function* () 
 });
 const main = () => __awaiter(void 0, void 0, void 0, function* () {
     ui.log('🚀 Starting efoy-sync...', ui.icons.rocket, ui.colors.cyan);
+    const state = (0, state_1.loadState)();
+    if (state.uploadedFiles.length > 0) {
+        ui.warn(`Unfinished session detected with ${state.uploadedFiles.length} files already uploaded.`);
+        const resume = yield (0, prompt_1.confirm)('Do you want to resume the previous session?');
+        if (!resume) {
+            (0, state_1.clearState)();
+            state.uploadedFiles = [];
+            ui.info('Previous session cleared. Starting a fresh deployment.');
+        }
+    }
     const defaultConfigContent = JSON.stringify({
         "run": "npm run build",
         "final_folder": "dist",
@@ -201,14 +212,15 @@ const main = () => __awaiter(void 0, void 0, void 0, function* () {
     if (proceed) {
         ui.step(`Starting deployment via ${method}...`);
         if (method === 'ftp') {
-            yield uploadViaFtp(config);
+            yield uploadViaFtp(config, ui, state);
         }
         else if (method === 'ssh') {
-            yield (0, ssh_1.uploadViaSsh)(config, ui);
+            yield (0, ssh_1.uploadViaSsh)(config, ui, state);
         }
         else {
             handleError(new Error('Invalid deployment method specified in efoy-sync.json'));
         }
+        (0, state_1.clearState)(); // Clear the state only on successful completion
         ui.log('🎉 Deployment finished successfully!', ui.icons.finish, ui.colors.green);
     }
     else {

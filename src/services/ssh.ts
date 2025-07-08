@@ -1,24 +1,3 @@
-import { exec } from 'child_process';
-
-export const uploadViaSsh = (config: any, ui: any): Promise<void> => {
+import { exec } from 'child_process';import * as fs from 'fs';import * as path from 'path';import { SyncState, saveState } from './state';const getAllFiles = (dirPath: string, arrayOfFiles: string[] = []) => {    const files = fs.readdirSync(dirPath);    arrayOfFiles = arrayOfFiles || [];    files.forEach((file) => {        if (fs.statSync(path.join(dirPath, file)).isDirectory()) {            arrayOfFiles = getAllFiles(path.join(dirPath, file), arrayOfFiles);        } else {            arrayOfFiles.push(path.join(dirPath, file));        }    });    return arrayOfFiles;};export const uploadViaSsh = async (config: any, ui: any, state: SyncState): Promise<void> => {
     const { host, username, privateKey } = config.ssh!;
-    const sourceDir = `${config.final_folder}/.`
-    const scpCommand = `scp -r -i ${privateKey} "${sourceDir}" ${username}@${host}:"${config.destination_folder}"`;
-
-    return new Promise<void>((resolve, reject) => {
-        ui.step('Uploading files via SCP...');
-        exec(scpCommand, (error, stdout, stderr) => {
-            if (error) {
-                const errorMessage = `SCP failed with error: ${error.message}\nStderr: ${stderr}\nStdout: ${stdout}`;
-                ui.error(errorMessage);
-                return reject(new Error(errorMessage));
-            }
-            if (stderr) {
-                ui.warn(`SCP stderr (non-fatal): ${stderr}`);
-            }
-            ui.info(`SCP stdout: ${stdout}`);
-            ui.success('File upload completed successfully.');
-            resolve();
-        });
-    });
-};
+    const remoteDestinationFolder = config.destination_folder;    const sourceDir = config.final_folder;    const allFiles = getAllFiles(sourceDir);    for (const localPath of allFiles) {        if (state.uploadedFiles.includes(localPath)) {            ui.info(`Skipping already uploaded file: ${localPath}`);            continue;        }        const remotePath = path.posix.join(remoteDestinationFolder, path.relative(sourceDir, localPath));        const remoteDirPath = path.posix.dirname(remotePath);        const mkdirCommand = `ssh -i ${privateKey} ${username}@${host} "mkdir -p ${remoteDirPath}"`;        const scpCommand = `scp -i ${privateKey} "${localPath}" ${username}@${host}:"${remotePath}"`;        await new Promise<void>((resolve, reject) => {            exec(mkdirCommand, (error, stdout, stderr) => {                if (error) {                    return reject(new Error(`Failed to create remote directory: ${stderr}`));                }                resolve();            });        });        await new Promise<void>((resolve, reject) => {            ui.step(`Uploading ${localPath} to ${remotePath}`);            exec(scpCommand, (error, stdout, stderr) => {                if (error) {                    const errorMessage = `SCP failed for ${localPath}: ${error.message}\nStderr: ${stderr}\nStdout: ${stdout}`;                    ui.error(errorMessage);                    return reject(new Error(errorMessage));                }                state.uploadedFiles.push(localPath);                saveState(state);                ui.success(`Successfully uploaded: ${localPath}`);                resolve();            });        });    }}; 

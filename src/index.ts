@@ -6,6 +6,7 @@ import { exec } from 'child_process';
 import { CustomFtpClient } from './services/ftp';
 import { uploadViaSsh } from './services/ssh';
 import { confirm } from './services/prompt';
+import { loadState, clearState, SyncState } from './services/state';
 
 const configFilePath = path.join(process.cwd(), 'efoy-sync.json');
 interface Config {
@@ -115,7 +116,7 @@ const runCommand = (command: string): Promise<void> => {
     });
 };
 
-const uploadViaFtp = async (config: Config) => {
+const uploadViaFtp = async (config: Config, ui: any, state: SyncState) => {
     const client = new CustomFtpClient(config.ftp!.FTP_ADDRESS!);
     try {
         ui.step('Connecting to FTP server...');
@@ -123,7 +124,7 @@ const uploadViaFtp = async (config: Config) => {
         ui.success('FTP connection successful.');
         ui.step(`Uploading files from ${config.final_folder} to ${config.destination_folder}`);
         await client.ensureDir(config.destination_folder);
-        await client.uploadFromDir(config.final_folder, config.destination_folder);
+        await client.uploadFromDir(config.final_folder, config.destination_folder, state, ui);
         ui.success('File upload completed successfully.');
     } catch (err) {
         handleError(err);
@@ -135,6 +136,18 @@ const uploadViaFtp = async (config: Config) => {
 
 const main = async () => {
     ui.log('🚀 Starting efoy-sync...', ui.icons.rocket, ui.colors.cyan);
+
+    const state: SyncState = loadState();
+
+    if (state.uploadedFiles.length > 0) {
+        ui.warn(`Unfinished session detected with ${state.uploadedFiles.length} files already uploaded.`);
+        const resume = await confirm('Do you want to resume the previous session?');
+        if (!resume) {
+            clearState();
+            state.uploadedFiles = [];
+            ui.info('Previous session cleared. Starting a fresh deployment.');
+        }
+    }
 
     const defaultConfigContent = JSON.stringify({
         "run": "npm run build",
@@ -188,12 +201,13 @@ const main = async () => {
     if (proceed) {
         ui.step(`Starting deployment via ${method}...`);
         if (method === 'ftp') {
-            await uploadViaFtp(config);
+            await uploadViaFtp(config, ui, state);
         } else if (method === 'ssh') {
-            await uploadViaSsh(config, ui);
+            await uploadViaSsh(config, ui, state);
         } else {
             handleError(new Error('Invalid deployment method specified in efoy-sync.json'));
         }
+        clearState(); // Clear the state only on successful completion
         ui.log('🎉 Deployment finished successfully!', ui.icons.finish, ui.colors.green);
     } else {
         ui.log('🛑 Deployment cancelled by user.', ui.icons.cancel, ui.colors.yellow);
