@@ -34,21 +34,21 @@ Create an `efoy-sync.json` file in the root of your project with the following s
       "name": "Clean remote directory",
       "order": 2,
       "target": "ssh",
-      "command": "cd /var/www/html/forlab && rm -rf all_files"
+      "command": "rm -rf /var/www/html/your_app/* /var/www/html/your_app/.[!.]* /var/www/html/your_app/..?*"
     },
     {
       "type": "upload",
       "name": "Upload build",
       "order": 3,
       "sourceDir": "dist",
-      "destinationDir": "/var/www/html/forlab",
+      "destinationDir": "/var/www/html/your_app",
       "method": "ssh",
       "preserveMode": true,
       "uploadStrategy": "tar"
     }
   ],
   "sourceDir": "dist",
-  "destinationDir": "/var/www/html/forlab",
+  "destinationDir": "/var/www/html/your_app",
   "method": "ssh",
   "uploadStrategy": "tar",
   "ssh": {
@@ -64,6 +64,8 @@ Create an `efoy-sync.json` file in the root of your project with the following s
   }
 }
 ```
+
+You can also start from the sample file `efoy-sync.sample.json` and update the placeholders.
 
 ### Configuration Options
 

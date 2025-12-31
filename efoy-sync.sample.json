@@ -1,0 +1,41 @@
+{
+  "run": [
+    {
+      "name": "Build project",
+      "order": 1,
+      "command": "npm run build"
+    },
+    {
+      "name": "Clean remote directory",
+      "order": 2,
+      "target": "ssh",
+      "command": "rm -rf /var/www/html/your_app/* /var/www/html/your_app/.[!.]* /var/www/html/your_app/..?*"
+    },
+    {
+      "type": "upload",
+      "name": "Upload build",
+      "order": 3,
+      "sourceDir": "dist",
+      "destinationDir": "/var/www/html/your_app",
+      "method": "ssh",
+      "uploadStrategy": "tar",
+      "preserveMode": false
+    }
+  ],
+  "sourceDir": "dist",
+  "destinationDir": "/var/www/html/your_app",
+  "method": "ssh",
+  "uploadStrategy": "tar",
+  "preserveMode": false,
+  "ssh": {
+    "host": "your_server_ip",
+    "username": "your_username",
+    "privateKey": "~/.ssh/id_rsa",
+    "password": "your_ssh_password"
+  },
+  "ftp": {
+    "FTP_USERNAME": "your_ftp_username",
+    "FTP_PASSWORD": "your_ftp_password",
+    "FTP_ADDRESS": "your_ftp_server"
+  }
+}
