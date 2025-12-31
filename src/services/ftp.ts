@@ -2,6 +2,14 @@ import { Socket } from 'net';
 import * as fs from 'fs';
 import * as path from 'path';
 import { SyncState, saveState } from './state';
+import { ByteProgress, logByteProgress } from './progress';
+
+const normalizeRemoteSegment = (segment: string): string => segment.replace(/\\/g, '/');
+
+export interface UploadProgress extends ByteProgress {
+    totalFiles: number;
+    processedFiles: number;
+}
 
 export class CustomFtpClient {
     private readonly controlSocket: Socket;
@@ -120,7 +128,12 @@ export class CustomFtpClient {
         return { host, port };
     }
 
-    async upload(localPath: string, remotePath: string): Promise<void> {
+    async upload(
+        localPath: string,
+        remotePath: string,
+        ui: any,
+        progress?: UploadProgress,
+    ): Promise<void> {
         const { host, port } = await this.enterPassiveMode();
 
         const dataSocket = new Socket();
@@ -153,6 +166,12 @@ export class CustomFtpClient {
             readStream.on('error', reject);
             dataSocket.on('error', reject);
             dataSocket.on('close', resolve);
+            readStream.on('data', (chunk) => {
+                if (progress) {
+                    progress.transferredBytes += chunk.length;
+                    logByteProgress(progress, ui);
+                }
+            });
             readStream.pipe(dataSocket);
         });
 
@@ -178,27 +197,49 @@ export class CustomFtpClient {
         }
     }
 
-    async uploadFromDir(localDir: string, remoteDir: string, state: SyncState, ui: any): Promise<void> {
+    async uploadFromDir(
+        localDir: string,
+        remoteDir: string,
+        state: SyncState,
+        ui: any,
+        progress?: UploadProgress,
+    ): Promise<void> {
         const files = fs.readdirSync(localDir);
+        const normalizedRemoteDir = normalizeRemoteSegment(remoteDir || '');
         for (const file of files) {
             const localPath = path.join(localDir, file);
-            const remotePath = path.join(remoteDir, file);
+            const remotePath = normalizeRemoteSegment(path.posix.join(normalizedRemoteDir, file));
 
             if (state.uploadedFiles.includes(localPath)) {
-                ui.info(`Skipping already uploaded file: ${localPath}`);
+                const progressLabel = progress && progress.totalFiles > 0
+                    ? `[${progress.processedFiles + 1}/${progress.totalFiles}] `
+                    : '';
+                ui.info(`${progressLabel}Skipping already uploaded file: ${localPath}`);
+                if (progress) {
+                    const fileSize = fs.statSync(localPath).size;
+                    progress.processedFiles += 1;
+                    progress.transferredBytes += fileSize;
+                    logByteProgress(progress, ui);
+                }
                 continue;
             }
 
             if (fs.statSync(localPath).isDirectory()) {
                 ui.step(`Creating directory: ${remotePath}`);
                 await this.ensureDir(remotePath);
-                await this.uploadFromDir(localPath, remotePath, state, ui);
+                await this.uploadFromDir(localPath, remotePath, state, ui, progress);
             } else {
-                ui.step(`Uploading file: ${localPath} to ${remotePath}`);
-                await this.upload(localPath, remotePath);
+                const progressLabel = progress && progress.totalFiles > 0
+                    ? `[${progress.processedFiles + 1}/${progress.totalFiles}] `
+                    : '';
+                ui.step(`${progressLabel}Uploading file: ${localPath} to ${remotePath}`);
+                await this.upload(localPath, remotePath, ui, progress);
                 state.uploadedFiles.push(localPath);
                 saveState(state);
                 ui.success(`Successfully uploaded: ${localPath}`);
+                if (progress) {
+                    progress.processedFiles += 1;
+                }
             }
         }
     }

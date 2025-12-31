@@ -47,6 +47,8 @@ const net_1 = require("net");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const state_1 = require("./state");
+const progress_1 = require("./progress");
+const normalizeRemoteSegment = (segment) => segment.replace(/\\/g, '/');
 class CustomFtpClient {
     constructor(host, port = 21) {
         this.dataSocket = null;
@@ -151,7 +153,7 @@ class CustomFtpClient {
             return { host, port };
         });
     }
-    upload(localPath, remotePath) {
+    upload(localPath, remotePath, ui, progress) {
         return __awaiter(this, void 0, void 0, function* () {
             const { host, port } = yield this.enterPassiveMode();
             const dataSocket = new net_1.Socket();
@@ -180,6 +182,12 @@ class CustomFtpClient {
                 readStream.on('error', reject);
                 dataSocket.on('error', reject);
                 dataSocket.on('close', resolve);
+                readStream.on('data', (chunk) => {
+                    if (progress) {
+                        progress.transferredBytes += chunk.length;
+                        (0, progress_1.logByteProgress)(progress, ui);
+                    }
+                });
                 readStream.pipe(dataSocket);
             });
             const responsePromise = this.readControlResponse();
@@ -202,27 +210,43 @@ class CustomFtpClient {
             }
         });
     }
-    uploadFromDir(localDir, remoteDir, state, ui) {
+    uploadFromDir(localDir, remoteDir, state, ui, progress) {
         return __awaiter(this, void 0, void 0, function* () {
             const files = fs.readdirSync(localDir);
+            const normalizedRemoteDir = normalizeRemoteSegment(remoteDir || '');
             for (const file of files) {
                 const localPath = path.join(localDir, file);
-                const remotePath = path.join(remoteDir, file);
+                const remotePath = normalizeRemoteSegment(path.posix.join(normalizedRemoteDir, file));
                 if (state.uploadedFiles.includes(localPath)) {
-                    ui.info(`Skipping already uploaded file: ${localPath}`);
+                    const progressLabel = progress && progress.totalFiles > 0
+                        ? `[${progress.processedFiles + 1}/${progress.totalFiles}] `
+                        : '';
+                    ui.info(`${progressLabel}Skipping already uploaded file: ${localPath}`);
+                    if (progress) {
+                        const fileSize = fs.statSync(localPath).size;
+                        progress.processedFiles += 1;
+                        progress.transferredBytes += fileSize;
+                        (0, progress_1.logByteProgress)(progress, ui);
+                    }
                     continue;
                 }
                 if (fs.statSync(localPath).isDirectory()) {
                     ui.step(`Creating directory: ${remotePath}`);
                     yield this.ensureDir(remotePath);
-                    yield this.uploadFromDir(localPath, remotePath, state, ui);
+                    yield this.uploadFromDir(localPath, remotePath, state, ui, progress);
                 }
                 else {
-                    ui.step(`Uploading file: ${localPath} to ${remotePath}`);
-                    yield this.upload(localPath, remotePath);
+                    const progressLabel = progress && progress.totalFiles > 0
+                        ? `[${progress.processedFiles + 1}/${progress.totalFiles}] `
+                        : '';
+                    ui.step(`${progressLabel}Uploading file: ${localPath} to ${remotePath}`);
+                    yield this.upload(localPath, remotePath, ui, progress);
                     state.uploadedFiles.push(localPath);
                     (0, state_1.saveState)(state);
                     ui.success(`Successfully uploaded: ${localPath}`);
+                    if (progress) {
+                        progress.processedFiles += 1;
+                    }
                 }
             }
         });

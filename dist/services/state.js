@@ -37,22 +37,28 @@ exports.clearState = exports.saveState = exports.loadState = void 0;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const stateFilePath = path.join(process.cwd(), '.efoy-sync.state.json');
+const withDefaults = (partial) => ({
+    uploadedFiles: Array.isArray(partial === null || partial === void 0 ? void 0 : partial.uploadedFiles) ? partial.uploadedFiles : [],
+    completedSteps: Array.isArray(partial === null || partial === void 0 ? void 0 : partial.completedSteps) ? partial.completedSteps : [],
+});
 const loadState = () => {
     if (fs.existsSync(stateFilePath)) {
         try {
             const content = fs.readFileSync(stateFilePath, 'utf8');
-            return JSON.parse(content);
+            const parsed = JSON.parse(content);
+            return withDefaults(parsed);
         }
         catch (error) {
             console.error('Failed to parse state file:', error);
-            return { uploadedFiles: [] };
+            return withDefaults(undefined);
         }
     }
-    return { uploadedFiles: [] };
+    return withDefaults(undefined);
 };
 exports.loadState = loadState;
 const saveState = (state) => {
-    fs.writeFileSync(stateFilePath, JSON.stringify(state, null, 2));
+    const normalized = withDefaults(state);
+    fs.writeFileSync(stateFilePath, JSON.stringify(normalized, null, 2));
 };
 exports.saveState = saveState;
 const clearState = () => {
