@@ -62,28 +62,6 @@ const escapeDoubleQuotes = (value) => value.replace(/(["\\$`])/g, '\\$1');
 const getTotalBytes = (filePaths) => filePaths.reduce((total, filePath) => {
     return total + fs.statSync(filePath).size;
 }, 0);
-const getTarArchiveSize = (sourceDir) => {
-    return new Promise((resolve, reject) => {
-        var _a, _b;
-        const tarProcess = (0, child_process_1.spawn)('tar', ['-czf', '-', '-C', sourceDir, '.']);
-        let totalBytes = 0;
-        let stderrBuffer = '';
-        (_a = tarProcess.stdout) === null || _a === void 0 ? void 0 : _a.on('data', (chunk) => {
-            totalBytes += chunk.length;
-        });
-        (_b = tarProcess.stderr) === null || _b === void 0 ? void 0 : _b.on('data', (data) => {
-            stderrBuffer += data.toString();
-        });
-        tarProcess.on('error', (error) => reject(error));
-        tarProcess.on('close', (code) => {
-            if (code === 0) {
-                resolve(totalBytes);
-                return;
-            }
-            reject(new Error(stderrBuffer.trim() || `tar exited with code ${code}`));
-        });
-    });
-};
 const getAllFiles = (dirPath, arrayOfFiles = []) => {
     const files = fs.readdirSync(dirPath);
     for (const file of files) {
@@ -132,30 +110,23 @@ const mapSpawnError = (error, credentials) => {
     return error;
 };
 const createSshProcess = (credentials, command, options = {}) => {
+    var _a;
     ensureSshAuth(credentials);
     const args = buildSshArgs(credentials, command);
     if (hasPassword(credentials) && !hasPrivateKey(credentials)) {
-        return (0, child_process_1.spawn)('sshpass', ['-p', credentials.password, 'ssh', ...args], {
-            env: options.env,
+        return (0, child_process_1.spawn)('sshpass', ['-e', 'ssh', ...args], {
+            env: Object.assign(Object.assign(Object.assign({}, process.env), options.env), { SSHPASS: credentials.password }),
         });
     }
-    return (0, child_process_1.spawn)('ssh', args, { env: options.env });
+    return (0, child_process_1.spawn)('ssh', args, { env: (_a = options.env) !== null && _a !== void 0 ? _a : process.env });
 };
 exports.createSshProcess = createSshProcess;
 const uploadViaSshTar = (sourceDir, destinationDir, credentials, preserveMode, ui, state) => __awaiter(void 0, void 0, void 0, function* () {
     const allFiles = getAllFiles(sourceDir);
-    let totalBytes = 0;
-    try {
-        ui.info('Calculating archive size for progress...');
-        totalBytes = yield getTarArchiveSize(sourceDir);
-    }
-    catch (error) {
-        ui.warn(`Archive size estimate failed, falling back to file sizes. Error: ${error.message}`);
-        totalBytes = getTotalBytes(allFiles);
-    }
     const progress = {
-        totalBytes,
+        totalBytes: getTotalBytes(allFiles),
         transferredBytes: 0,
+        maxPercent: 99,
     };
     yield new Promise((resolve, reject) => {
         var _a, _b, _c;
@@ -176,6 +147,7 @@ const uploadViaSshTar = (sourceDir, destinationDir, credentials, preserveMode, u
             }
             if (sshCode === 0 && tarCode === 0) {
                 progress.transferredBytes = progress.totalBytes;
+                progress.maxPercent = 100;
                 (0, progress_1.logByteProgress)(progress, ui);
                 state.uploadedFiles = allFiles;
                 (0, state_1.saveState)(state);

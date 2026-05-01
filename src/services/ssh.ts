@@ -22,29 +22,6 @@ const getTotalBytes = (filePaths: string[]): number => filePaths.reduce((total, 
     return total + fs.statSync(filePath).size;
 }, 0);
 
-const getTarArchiveSize = (sourceDir: string): Promise<number> => {
-    return new Promise((resolve, reject) => {
-        const tarProcess = spawn('tar', ['-czf', '-', '-C', sourceDir, '.']);
-        let totalBytes = 0;
-        let stderrBuffer = '';
-
-        tarProcess.stdout?.on('data', (chunk) => {
-            totalBytes += chunk.length;
-        });
-        tarProcess.stderr?.on('data', (data) => {
-            stderrBuffer += data.toString();
-        });
-        tarProcess.on('error', (error) => reject(error));
-        tarProcess.on('close', (code) => {
-            if (code === 0) {
-                resolve(totalBytes);
-                return;
-            }
-            reject(new Error(stderrBuffer.trim() || `tar exited with code ${code}`));
-        });
-    });
-};
-
 export interface SshCredentials {
     host: string;
     username: string;
@@ -110,11 +87,15 @@ export const createSshProcess = (
     ensureSshAuth(credentials);
     const args = buildSshArgs(credentials, command);
     if (hasPassword(credentials) && !hasPrivateKey(credentials)) {
-        return spawn('sshpass', ['-p', credentials.password as string, 'ssh', ...args], {
-            env: options.env,
+        return spawn('sshpass', ['-e', 'ssh', ...args], {
+            env: {
+                ...process.env,
+                ...options.env,
+                SSHPASS: credentials.password as string,
+            },
         });
     }
-    return spawn('ssh', args, { env: options.env });
+    return spawn('ssh', args, { env: options.env ?? process.env });
 };
 
 export interface UploadViaSshOptions {
@@ -134,18 +115,10 @@ const uploadViaSshTar = async (
     state: SyncState,
 ): Promise<void> => {
     const allFiles = getAllFiles(sourceDir);
-    let totalBytes = 0;
-    try {
-        ui.info('Calculating archive size for progress...');
-        totalBytes = await getTarArchiveSize(sourceDir);
-    } catch (error) {
-        ui.warn(`Archive size estimate failed, falling back to file sizes. Error: ${(error as Error).message}`);
-        totalBytes = getTotalBytes(allFiles);
-    }
-
     const progress: ByteProgress = {
-        totalBytes,
+        totalBytes: getTotalBytes(allFiles),
         transferredBytes: 0,
+        maxPercent: 99,
     };
 
     await new Promise<void>((resolve, reject) => {
@@ -167,6 +140,7 @@ const uploadViaSshTar = async (
             }
             if (sshCode === 0 && tarCode === 0) {
                 progress.transferredBytes = progress.totalBytes;
+                progress.maxPercent = 100;
                 logByteProgress(progress, ui);
                 state.uploadedFiles = allFiles;
                 saveState(state);

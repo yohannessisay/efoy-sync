@@ -1,6 +1,7 @@
 export interface ByteProgress {
     totalBytes: number;
     transferredBytes: number;
+    maxPercent?: number;
     lastLoggedPercent?: number;
     lastLoggedAt?: number;
 }
@@ -26,11 +27,12 @@ export const logByteProgress = (
         return;
     }
     const transferred = Math.min(progress.transferredBytes, progress.totalBytes);
-    const percent = Math.min(100, Math.floor((transferred / progress.totalBytes) * 100));
+    const maxPercent = progress.maxPercent ?? 100;
+    const percent = Math.min(maxPercent, Math.floor((transferred / progress.totalBytes) * 100));
     const now = Date.now();
     const lastPercent = progress.lastLoggedPercent ?? -1;
     const lastLoggedAt = progress.lastLoggedAt ?? 0;
-    const shouldLog = percent >= lastPercent + 5 || now - lastLoggedAt >= 1500 || percent === 100;
+    const shouldLog = percent >= lastPercent + 5 || now - lastLoggedAt >= 1500 || (percent === 100 && lastPercent < 100);
 
     if (!shouldLog) {
         return;
