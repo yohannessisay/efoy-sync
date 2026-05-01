@@ -1,0 +1,22 @@
+{
+  "run": [
+    {
+      "name": "Build project",
+      "order": 1,
+      "command": "npm run build"
+    },
+    {
+      "type": "upload",
+      "name": "Copy build locally",
+      "order": 2,
+      "sourceDir": "dist",
+      "destinationDir": "./deploy-output",
+      "method": "local",
+      "preserveMode": true
+    }
+  ],
+  "sourceDir": "dist",
+  "destinationDir": "./deploy-output",
+  "method": "local",
+  "preserveMode": true
+}

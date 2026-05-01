@@ -7,10 +7,13 @@ import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 import { CustomFtpClient, UploadProgress } from './services/ftp';
 import { createSshProcess, uploadViaSsh, UploadViaSshOptions, SshCredentials } from './services/ssh';
+import { uploadViaLocal, UploadViaLocalOptions } from './services/local';
+import { assertSafeCommand } from './services/safety';
 import { confirm } from './services/prompt';
 import { loadState, clearState, saveState, SyncState } from './services/state';
 
 type StepTarget = 'local' | 'ssh';
+type DeploymentMethod = 'ftp' | 'ssh' | 'local';
 
 interface BaseRunStep {
     name?: string;
@@ -38,7 +41,7 @@ interface UploadRunStep extends BaseRunStep {
     type: 'upload';
     sourceDir?: string;
     destinationDir?: string;
-    method?: 'ftp' | 'ssh';
+    method?: DeploymentMethod;
     preserveMode?: boolean;
     uploadStrategy?: 'files' | 'tar';
     ssh?: Partial<SshCredentials>;
@@ -67,7 +70,7 @@ interface Config {
     destination_folder?: string;
     sourceDir?: string;
     destinationDir?: string;
-    method: 'ftp' | 'ssh';
+    method: DeploymentMethod;
     preserveMode?: boolean;
     uploadStrategy?: 'files' | 'tar';
     ftp?: {
@@ -82,6 +85,9 @@ const logDir = path.join(process.cwd(), 'efoy-sync-logs');
 
 const getDefaultSourceDir = (config: Config): string => config.sourceDir ?? config.final_folder ?? '';
 const getDefaultDestinationDir = (config: Config): string => config.destinationDir ?? config.destination_folder ?? '';
+const isDeploymentMethod = (value: unknown): value is DeploymentMethod => {
+    return value === 'ftp' || value === 'ssh' || value === 'local';
+};
 
 const listLocalFiles = (dirPath: string, results: string[] = []): string[] => {
     const entries = fs.readdirSync(dirPath);
@@ -241,10 +247,15 @@ const handleError = (error: any) => {
         /FTP configuration is missing or incomplete/i,
         /Source directory for FTP upload does not exist/i,
         /Source directory for SSH upload does not exist/i,
+        /Source directory for local upload does not exist/i,
+        /Local destination directory must not be/i,
         /SSH configuration is missing/i,
         /SSH authentication is missing/i,
+        /Blocked destructive command/i,
         /sshpass/i,
         /Invalid run step definition/i,
+        /Invalid upload step/i,
+        /Invalid command step/i,
         /Unsupported run step type/i,
         /Invalid run configuration/i,
     ];
@@ -252,7 +263,7 @@ const handleError = (error: any) => {
     const isConfigError = configErrorPatterns.some(pattern => pattern.test(errorMessage));
 
     if (isConfigError) {
-        ui.error('It looks like there\'s a problem with your efoy-sync.json configuration. Please double-check your server address, username, password, and private key path for the selected deployment method (FTP or SSH).');
+        ui.error('It looks like there\'s a problem with your efoy-sync.json configuration. Please double-check your paths, server address, username, password, and private key path for the selected deployment method (FTP, SSH, or local).');
         ui.info(`Original error details: ${errorMessage}`);
     } else {
         ui.error(`An unexpected error occurred: ${errorMessage}`);
@@ -264,6 +275,7 @@ const runCommand = (
     command: string,
     options: { cwd?: string; env?: Record<string, string> } = {},
 ): Promise<void> => {
+    assertSafeCommand(command);
     return new Promise((resolve, reject) => {
         ui.step(`Running command: ${command}`);
         const spawnOptions = {
@@ -313,6 +325,7 @@ const runRemoteCommand = (
     config: Config,
     step: CommandRunStep,
 ): Promise<void> => {
+    assertSafeCommand(command);
     const ssh = resolveSshConfig(config, step.ssh);
     return new Promise((resolve, reject) => {
         const spawnOptions = {
@@ -488,6 +501,11 @@ const normalizeRunSteps = (run: Config['run']): RunStep[] => {
                     throw new Error(`Invalid upload step at index ${index}. 'uploadStrategy' must be 'files' or 'tar'.`);
                 }
 
+                const method = candidate.method;
+                if (method !== undefined && !isDeploymentMethod(method)) {
+                    throw new Error(`Invalid upload step at index ${index}. 'method' must be 'ftp', 'ssh', or 'local'.`);
+                }
+
                 const sshOverride = candidate.ssh && typeof candidate.ssh === 'object'
                     ? candidate.ssh as Partial<SshCredentials>
                     : undefined;
@@ -500,7 +518,7 @@ const normalizeRunSteps = (run: Config['run']): RunStep[] => {
                     type: 'upload',
                     sourceDir: rawSourceDir as string | undefined,
                     destinationDir: rawDestinationDir as string | undefined,
-                    method: candidate.method as ('ftp' | 'ssh') | undefined,
+                    method: method as DeploymentMethod | undefined,
                     name: candidate.name as string | undefined,
                     description: candidate.description as string | undefined,
                     order: order as number | undefined,
@@ -598,6 +616,16 @@ const executeRunStep = async (
         return;
     }
 
+    if (method === 'local') {
+        const options: UploadViaLocalOptions = {
+            sourceDir: step.sourceDir,
+            destinationDir: step.destinationDir,
+            preserveMode: step.preserveMode,
+        };
+        await uploadViaLocal(config, ui, state, options);
+        return;
+    }
+
     throw new Error(`Unsupported upload method: ${method}`);
 };
 
@@ -678,6 +706,9 @@ const main = async () => {
     const method = config.method;
     if (!method) {
         handleError(new Error('Missing required fields in efoy-sync.json'));
+    }
+    if (!isDeploymentMethod(method)) {
+        handleError(new Error('Invalid deployment method specified in efoy-sync.json'));
     }
     if (config.uploadStrategy && config.uploadStrategy !== 'files' && config.uploadStrategy !== 'tar') {
         handleError(new Error('Invalid upload strategy specified in efoy-sync.json'));

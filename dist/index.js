@@ -50,6 +50,8 @@ const crypto = __importStar(require("crypto"));
 const child_process_1 = require("child_process");
 const ftp_1 = require("./services/ftp");
 const ssh_1 = require("./services/ssh");
+const local_1 = require("./services/local");
+const safety_1 = require("./services/safety");
 const prompt_1 = require("./services/prompt");
 const state_1 = require("./services/state");
 const expandHomePath = (input) => {
@@ -62,6 +64,9 @@ const configFilePath = path.join(process.cwd(), 'efoy-sync.json');
 const logDir = path.join(process.cwd(), 'efoy-sync-logs');
 const getDefaultSourceDir = (config) => { var _a, _b; return (_b = (_a = config.sourceDir) !== null && _a !== void 0 ? _a : config.final_folder) !== null && _b !== void 0 ? _b : ''; };
 const getDefaultDestinationDir = (config) => { var _a, _b; return (_b = (_a = config.destinationDir) !== null && _a !== void 0 ? _a : config.destination_folder) !== null && _b !== void 0 ? _b : ''; };
+const isDeploymentMethod = (value) => {
+    return value === 'ftp' || value === 'ssh' || value === 'local';
+};
 const listLocalFiles = (dirPath, results = []) => {
     const entries = fs.readdirSync(dirPath);
     for (const entry of entries) {
@@ -213,16 +218,21 @@ const handleError = (error) => {
         /FTP configuration is missing or incomplete/i,
         /Source directory for FTP upload does not exist/i,
         /Source directory for SSH upload does not exist/i,
+        /Source directory for local upload does not exist/i,
+        /Local destination directory must not be/i,
         /SSH configuration is missing/i,
         /SSH authentication is missing/i,
+        /Blocked destructive command/i,
         /sshpass/i,
         /Invalid run step definition/i,
+        /Invalid upload step/i,
+        /Invalid command step/i,
         /Unsupported run step type/i,
         /Invalid run configuration/i,
     ];
     const isConfigError = configErrorPatterns.some(pattern => pattern.test(errorMessage));
     if (isConfigError) {
-        ui.error('It looks like there\'s a problem with your efoy-sync.json configuration. Please double-check your server address, username, password, and private key path for the selected deployment method (FTP or SSH).');
+        ui.error('It looks like there\'s a problem with your efoy-sync.json configuration. Please double-check your paths, server address, username, password, and private key path for the selected deployment method (FTP, SSH, or local).');
         ui.info(`Original error details: ${errorMessage}`);
     }
     else {
@@ -231,6 +241,7 @@ const handleError = (error) => {
     process.exit(1);
 };
 const runCommand = (command, options = {}) => {
+    (0, safety_1.assertSafeCommand)(command);
     return new Promise((resolve, reject) => {
         var _a, _b;
         ui.step(`Running command: ${command}`);
@@ -275,6 +286,7 @@ const resolveSshConfig = (config, overrides) => {
     return resolved;
 };
 const runRemoteCommand = (command, config, step) => {
+    (0, safety_1.assertSafeCommand)(command);
     const ssh = resolveSshConfig(config, step.ssh);
     return new Promise((resolve, reject) => {
         var _a, _b;
@@ -426,6 +438,10 @@ const normalizeRunSteps = (run) => {
                 if (uploadStrategy !== undefined && uploadStrategy !== 'files' && uploadStrategy !== 'tar') {
                     throw new Error(`Invalid upload step at index ${index}. 'uploadStrategy' must be 'files' or 'tar'.`);
                 }
+                const method = candidate.method;
+                if (method !== undefined && !isDeploymentMethod(method)) {
+                    throw new Error(`Invalid upload step at index ${index}. 'method' must be 'ftp', 'ssh', or 'local'.`);
+                }
                 const sshOverride = candidate.ssh && typeof candidate.ssh === 'object'
                     ? candidate.ssh
                     : undefined;
@@ -436,7 +452,7 @@ const normalizeRunSteps = (run) => {
                     type: 'upload',
                     sourceDir: rawSourceDir,
                     destinationDir: rawDestinationDir,
-                    method: candidate.method,
+                    method: method,
                     name: candidate.name,
                     description: candidate.description,
                     order: order,
@@ -519,6 +535,15 @@ const executeRunStep = (step, stepIndex, config, state) => __awaiter(void 0, voi
         yield (0, ssh_1.uploadViaSsh)(config, ui, state, options);
         return;
     }
+    if (method === 'local') {
+        const options = {
+            sourceDir: step.sourceDir,
+            destinationDir: step.destinationDir,
+            preserveMode: step.preserveMode,
+        };
+        yield (0, local_1.uploadViaLocal)(config, ui, state, options);
+        return;
+    }
     throw new Error(`Unsupported upload method: ${method}`);
 });
 const main = () => __awaiter(void 0, void 0, void 0, function* () {
@@ -593,6 +618,9 @@ const main = () => __awaiter(void 0, void 0, void 0, function* () {
     const method = config.method;
     if (!method) {
         handleError(new Error('Missing required fields in efoy-sync.json'));
+    }
+    if (!isDeploymentMethod(method)) {
+        handleError(new Error('Invalid deployment method specified in efoy-sync.json'));
     }
     if (config.uploadStrategy && config.uploadStrategy !== 'files' && config.uploadStrategy !== 'tar') {
         handleError(new Error('Invalid upload strategy specified in efoy-sync.json'));
