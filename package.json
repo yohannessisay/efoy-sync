@@ -1,7 +1,7 @@
 {
   "name": "efoy-sync",
-  "version": "1.2.0",
-  "description": "A simple tool to sync your build files to a remote server using FTP or SSH.",
+  "version": "1.3.0",
+  "description": "A simple tool to sync your build files using FTP, SSH, or local copy.",
   "main": "dist/index.js",
   "bin": {
     "efoy-sync": "dist/index.js"
